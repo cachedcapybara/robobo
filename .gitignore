@@ -78,6 +78,13 @@ celerybeat-schedule
 
 # dotenv
 .env
+.env.local
+.env.*.local
+
+# test / lint caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
 
 # virtualenv
 .venv/

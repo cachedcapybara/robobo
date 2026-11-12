@@ -1,0 +1,12 @@
+services:
+  robobo:
+    build: .
+    env_file:
+      - .env
+    restart: unless-stopped
+    init: true
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
