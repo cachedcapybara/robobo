@@ -45,8 +45,8 @@ def test_parse_tracker_versions() -> None:
     ]
 
 
-def test_parse_tracker_joins_wbr_and_uses_title_suite() -> None:
-    """真实页面用 <wbr> 拆版本号，且 label 是 o-o-stable 之类的缩写。"""
+def test_parse_tracker_joins_wbr() -> None:
+    """真实页面用 <wbr> 拆版本号，套件名按页面原始 label（如 o-o-stable）。"""
     html = """
     <html><body>
       <h1>x</h1>
@@ -65,7 +65,7 @@ def test_parse_tracker_joins_wbr_and_uses_title_suite() -> None:
 
     info = parse_package_page(html, fallback_name="x")
 
-    assert [(v.suite, v.version) for v in info.versions] == [("oldoldstable", "1:1.90.7-2")]
+    assert [(v.suite, v.version) for v in info.versions] == [("o-o-stable", "1:1.90.7-2")]
 
 
 def test_parse_tracker_without_versions_panel() -> None:
