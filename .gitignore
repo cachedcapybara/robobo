@@ -98,4 +98,6 @@ ENV/
 .ropeproject
 
 sample.json
-config.py
+
+# 旧版根目录 config.py 曾存放 bot token，继续忽略；robobo/config.py 是环境变量模块，需提交
+/config.py
