@@ -41,3 +41,6 @@ def test_versions_are_parameterized_and_mapped() -> None:
     query, args = pool.queries[0]
     assert "$1" in query
     assert args == ("libc6",)
+    # 按 Debian 官方发行顺序（releases.sort）排序，而不是字母序
+    assert "JOIN releases" in query
+    assert "r.sort" in query

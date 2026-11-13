@@ -15,10 +15,13 @@ import asyncpg
 log = logging.getLogger(__name__)
 
 _VERSIONS_SQL = """
-    SELECT release, version
-      FROM packages_summary
-     WHERE package = $1
-     ORDER BY release
+    SELECT ps.release, ps.version
+      FROM packages_summary ps
+      LEFT JOIN releases r
+        ON r.release = ps.release
+       AND r.distribution = 'debian'
+     WHERE ps.package = $1
+     ORDER BY r.sort ASC NULLS LAST, ps.release ASC
 """
 
 
