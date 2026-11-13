@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
+import asyncio
+from unittest.mock import create_autospec
+
 import pytest
+from telegram import Message
+from telegram.constants import ParseMode
 
 from robobo.config import ConfigError, load_settings, parse_poll_interval, parse_user_ids
-from robobo.handlers.common import SAFE_LIMIT, split_message
+from robobo.handlers.common import SAFE_LIMIT, reply_html, split_message
 
 
 def test_parse_user_ids_with_mixed_separators() -> None:
@@ -80,3 +85,20 @@ def test_split_message_hard_splits_long_line() -> None:
 
     assert all(len(chunk) <= SAFE_LIMIT for chunk in chunks)
     assert "".join(chunks) == text
+
+
+def test_reply_html_uses_ptb22_reply_text_arguments() -> None:
+    """PTB 22 移除了 reply_text 的 quote 参数，只能用 do_quote。"""
+
+    async def run() -> None:
+        message = create_autospec(Message, instance=True)
+
+        await reply_html(message, "hello")
+
+        message.reply_text.assert_awaited_once()
+        _, kwargs = message.reply_text.await_args
+        assert "quote" not in kwargs
+        assert kwargs["parse_mode"] == ParseMode.HTML
+        assert kwargs["link_preview_options"] is not None
+
+    asyncio.run(run())

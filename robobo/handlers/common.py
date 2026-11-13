@@ -58,5 +58,5 @@ async def reply_html(message: Message | None, text: str) -> None:
             chunk,
             parse_mode=ParseMode.HTML,
             link_preview_options=LinkPreviewOptions(is_disabled=True),
-            quote=False,
+            do_quote=False,
         )
