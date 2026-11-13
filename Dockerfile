@@ -1,4 +1,4 @@
-FROM python:3.13-slim
+FROM python:3.13-alpine
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -7,7 +7,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-RUN useradd --create-home --uid 10001 robobo
+# Alpine 用 BusyBox adduser；镜像以非 root 用户运行
+RUN adduser -D -u 10001 robobo
 
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt

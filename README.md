@@ -55,6 +55,23 @@ python -m robobo          # 或 python main.py
 
 ## Docker 部署
 
+基础镜像为 `python:3.13-alpine`（压缩后约 17 MB，最终镜像约 25 MB），以非 root 用户运行，不暴露任何端口（long polling 只做出站连接）。
+
+### 使用 GHCR 镜像
+
+GitHub Actions 会在每次 push 到 master 时构建 `linux/amd64` + `linux/arm64` 镜像并发布到 GHCR：
+
+```bash
+docker pull ghcr.io/cachedcapybara/robobo:latest
+docker run -d --name robobo --restart unless-stopped --env-file .env ghcr.io/cachedcapybara/robobo:latest
+```
+
+镜像标签：`latest`（默认分支）、`sha-<短 sha>`、`v<版本>`（如 `v0.2.0`）、分支名。
+
+> GHCR 上的包默认是 private。首次构建后需要到 GitHub → Packages → robobo → Package settings → Change visibility → Public，才能被匿名拉取。
+
+### 本地构建
+
 ```bash
 cp .env.example .env    # 填 token
 docker compose up -d --build
@@ -67,8 +84,6 @@ docker compose logs -f
 docker build -t robobo .
 docker run -d --name robobo --restart unless-stopped --env-file .env robobo
 ```
-
-镜像以非 root 用户运行，不暴露任何端口（long polling 只做出站连接）。
 
 ## systemd（不用 Docker）
 
