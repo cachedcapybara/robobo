@@ -128,6 +128,18 @@ def test_format_topic_escapes_html() -> None:
     assert f"{BASE_URL}/t/evil/1" in text
 
 
+def test_format_topic_prefix_outside_link_and_title_is_link() -> None:
+    topic = parse_latest_payload(
+        make_payload(make_topic(1, title="Hello", slug="hello")),
+        BASE_URL,
+    )[0]
+
+    text = format_topic(topic)
+
+    # [论坛新帖] 在 <a> 外面，标题本身是链接文字
+    assert text == f'📢 [论坛新帖] <a href="{BASE_URL}/t/hello/1"><b>Hello</b></a>'
+
+
 def test_first_poll_sets_baseline_without_notifying() -> None:
     async def run() -> None:
         sender = FakeSender()

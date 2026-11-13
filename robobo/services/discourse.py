@@ -84,10 +84,10 @@ async def fetch_latest_topics(
 
 
 def format_topic(topic: DiscourseTopic) -> str:
-    """把主题格式化成 Telegram HTML 消息。"""
+    """把主题格式化成 Telegram HTML 消息：标签 + 标题即链接。"""
     title = html.escape(topic.title)
     url = html.escape(topic.url, quote=True)
-    return f'📢 <b>{title}</b>\n<a href="{url}">{url}</a>'
+    return f'📢 [论坛新帖] <a href="{url}"><b>{title}</b></a>'
 
 
 class DiscourseNotifier:
