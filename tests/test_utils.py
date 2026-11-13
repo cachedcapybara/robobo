@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from robobo.config import ConfigError, parse_user_ids
+from robobo.config import ConfigError, load_settings, parse_poll_interval, parse_user_ids
 from robobo.handlers.common import SAFE_LIMIT, split_message
 
 
@@ -20,6 +20,43 @@ def test_parse_user_ids_empty() -> None:
 def test_parse_user_ids_rejects_garbage() -> None:
     with pytest.raises(ConfigError):
         parse_user_ids("1, abc")
+
+
+def test_parse_poll_interval_defaults() -> None:
+    assert parse_poll_interval(None) == 60.0
+    assert parse_poll_interval("   ") == 60.0
+    assert parse_poll_interval("30") == 30.0
+
+
+def test_parse_poll_interval_rejects_invalid() -> None:
+    with pytest.raises(ConfigError):
+        parse_poll_interval("abc")
+    with pytest.raises(ConfigError):
+        parse_poll_interval("0")
+
+
+def test_load_settings_requires_bot_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("BOT_TOKEN", raising=False)
+    monkeypatch.setattr("robobo.config.load_dotenv", lambda: None)
+
+    with pytest.raises(ConfigError):
+        load_settings()
+
+
+def test_load_settings_parses_discourse_options(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("robobo.config.load_dotenv", lambda: None)
+    monkeypatch.setenv("BOT_TOKEN", "123:abc")
+    monkeypatch.setenv("DISCOURSE_URL", "https://forum.example.com")
+    monkeypatch.setenv("DISCOURSE_CATEGORY", "ask")
+    monkeypatch.setenv("DISCOURSE_POLL_INTERVAL", "30")
+    monkeypatch.setenv("NOTIFY_CHAT_ID", "-1001234567890")
+
+    settings = load_settings()
+
+    assert settings.discourse_url == "https://forum.example.com"
+    assert settings.discourse_category == "ask"
+    assert settings.discourse_poll_interval == 30.0
+    assert settings.notify_chat_id == "-1001234567890"
 
 
 def test_split_message_keeps_short_text_intact() -> None:

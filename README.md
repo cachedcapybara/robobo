@@ -15,6 +15,8 @@
 | `/pkg <包名>` | 从 [UDD](https://udd.debian.org/) 镜像查询版本（可关闭） |
 | `/bug <编号>` | 查询 [Debian BTS](https://bugs.debian.org) 缺陷标题与链接 |
 
+除命令外，配置 `DISCOURSE_URL` 后 bot 会**定时轮询 Discourse 论坛**，把新主题的标题和链接推送到 `NOTIFY_CHAT_ID`（主动出站轮询，不需要域名/入站端口）。
+
 ## 快速开始
 
 需要 Python 3.10 及以上。
@@ -44,6 +46,10 @@ python -m robobo          # 或 python main.py
 | `UDD_DSN` | — | UDD 连接串；留空则 `/pkg` 回复"未配置" |
 | `TELEGRAM_PROXY` | — | 访问 `api.telegram.org` 需要代理时填写，支持 `http://` / `socks5://` |
 | `LOG_LEVEL` | — | 默认 `INFO` |
+| `DISCOURSE_URL` | — | Discourse 站点地址（如 `https://forum.example.com`）；留空则不启用新帖通知 |
+| `DISCOURSE_CATEGORY` | — | 只关注某个分类（slug，如 `feedback`）；留空则关注全站 |
+| `DISCOURSE_POLL_INTERVAL` | — | 轮询间隔秒数，默认 `60` |
+| `NOTIFY_CHAT_ID` | — | 接收新帖通知的群/会话 ID；设置 `DISCOURSE_URL` 时必须配置 |
 
 > `socks5://` 代理需要在镜像/环境里额外安装 `httpx[socks]`。
 
@@ -85,6 +91,26 @@ User=robobo
 WantedBy=multi-user.target
 ```
 
+## Discourse 新帖通知
+
+配置 `DISCOURSE_URL` 和 `NOTIFY_CHAT_ID` 后，bot 会后台轮询 Discourse 的公开 JSON feed，发现新主题就推送到目标群/会话：
+
+```bash
+DISCOURSE_URL=https://forum.example.com   # 必填
+DISCOURSE_CATEGORY=feedback               # 可选，只关注某个分类
+DISCOURSE_POLL_INTERVAL=60                # 可选，秒
+NOTIFY_CHAT_ID=-1001234567890              # 必填，群 ID（supergroup 以 -100 开头）
+```
+
+实现要点：
+
+- **主动轮询，不需要 webhook**：Discourse 的 `/latest.json`（或 `/c/<slug>/l/latest.json`）公开可访问，bot 定时出站抓取即可，因此不需要域名、证书或入站端口，和 long polling 架构一致。
+- **水位线去重**：首次轮询只记录当前最大 topic id，不补发历史主题；之后只推送 `id` 更大的新主题。
+- **发送失败不丢帖**：某条推送失败时保留水位线，下一轮会重试该主题。
+- 公开论坛无需 API key；如需只看某个分类，填写 `DISCOURSE_CATEGORY` 即可。
+
+> 若要改成 Discourse webhook 实时推送，则必须提供一个公网 HTTPS 入口（Discourse 无法访问内网/NAT 地址），可以额外跑一个小的 webhook 接收端再调用 Bot API 发消息。
+
 ## 为什么不需要域名？
 
 Telegram 提供两种收消息的方式：
@@ -118,7 +144,8 @@ robobo/
 └── services/         # 纯业务逻辑（可独立测试）
     ├── tracker.py
     ├── bts.py
-    └── udd.py
+    ├── udd.py
+    └── discourse.py   # 轮询 Discourse 新帖并推送
 tests/                # pytest，不联网
 ```
 

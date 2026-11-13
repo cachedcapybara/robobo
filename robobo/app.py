@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import logging
 
-from telegram import BotCommand, Message, Update
+from telegram import BotCommand, LinkPreviewOptions, Message, Update
+from telegram.constants import ParseMode
 from telegram.ext import (
     AIORateLimiter,
     Application,
@@ -18,6 +19,7 @@ from . import deps
 from .config import Settings
 from .handlers import basic, bug, pkg, tracker
 from .http import create_client
+from .services.discourse import DiscourseNotifier
 from .services.udd import UddClient
 
 log = logging.getLogger(__name__)
@@ -53,13 +55,43 @@ async def _post_shutdown(app: Application) -> None:
     if udd is not None:
         await udd.close()
 
+    notifier = app.bot_data.pop(deps.DISCOURSE_NOTIFIER, None)
+    if notifier is not None:
+        await notifier.stop()
+
     log.info("robobo stopped")
 
 
 def _make_post_init(settings: Settings):
     async def post_init(app: Application) -> None:
-        app.bot_data[deps.HTTP_CLIENT] = create_client(settings.proxy)
+        http = create_client(settings.proxy)
+        app.bot_data[deps.HTTP_CLIENT] = http
         app.bot_data[deps.UDD_CLIENT] = UddClient(settings.udd_dsn)
+
+        chat_id = settings.notify_chat_id
+        if settings.discourse_url and chat_id:
+            notifier = DiscourseNotifier(
+                http,
+                base_url=settings.discourse_url,
+                category=settings.discourse_category,
+                interval=settings.discourse_poll_interval,
+                sender=lambda text: app.bot.send_message(
+                    chat_id=chat_id,
+                    text=text,
+                    parse_mode=ParseMode.HTML,
+                    link_preview_options=LinkPreviewOptions(is_disabled=True),
+                ),
+            )
+            notifier.start()
+            app.bot_data[deps.DISCOURSE_NOTIFIER] = notifier
+            log.info(
+                "Discourse 通知已启动：%s（每 %ss 轮询一次，推送到 %s）",
+                settings.discourse_url,
+                settings.discourse_poll_interval,
+                chat_id,
+            )
+        elif settings.discourse_url:
+            log.warning("已配置 DISCOURSE_URL 但缺少 NOTIFY_CHAT_ID，Discourse 通知不会启动")
 
         try:
             await app.bot.set_my_commands(COMMANDS)
