@@ -67,11 +67,24 @@ def _parse_versions(soup: BeautifulSoup) -> list[VersionEntry]:
     entries: list[VersionEntry] = []
     for item in panel.find_all("li"):
         label = item.find("b")
-        suite = label.get_text(" ", strip=True) if label else ""
-        version = _extract_version(item, suite)
+        # <wbr> 会把版本号拆成多个文本节点，必须用空分隔符拼接
+        label_text = label.get_text("", strip=True).strip(": ") if label else ""
+        # title 里是完整套件名（如 "Debian 11 (bullseye / oldoldstable)"），优先使用
+        suite = _suite_from_title(item) or label_text
+        version = _extract_version(item, label_text)
         if version:
             entries.append(VersionEntry(suite=suite or "?", version=version))
     return entries
+
+
+def _suite_from_title(item: Tag) -> str:
+    """从 versions-repository 的 title 属性里取完整套件名。"""
+    span = item.find("span", class_="versions-repository")
+    title = span.get("title", "") if span is not None else ""
+    if "/" in title:
+        # title 形如 "Debian 11 (bullseye / oldoldstable)"
+        return title.rsplit("/", 1)[1].strip().rstrip(")").strip()
+    return ""
 
 
 def _find_versions_panel(hint: PageElement) -> Tag | None:
@@ -82,16 +95,17 @@ def _find_versions_panel(hint: PageElement) -> Tag | None:
     return hint.find_parent(class_="panel-body")
 
 
-def _extract_version(item: Tag, suite: str) -> str:
+def _extract_version(item: Tag, label: str) -> str:
     link = item.find("a")
     if link is not None:
-        linked = link.get_text(" ", strip=True)
+        # 版本号可能被 <wbr> 拆开，用空分隔符拼接成完整字符串
+        linked = link.get_text("", strip=True)
         if _DIGIT.search(linked):
             return linked
 
-    text = item.get_text(" ", strip=True)
-    if suite:
-        text = text.replace(suite, "", 1)
+    text = item.get_text("", strip=True)
+    if label:
+        text = text.replace(label, "", 1)
     return text.strip(" :")
 
 

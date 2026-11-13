@@ -11,10 +11,22 @@ TRACKER_HTML = """
   <div class="panel panel-default">
     <div class="panel-heading"><h4>versions</h4></div>
     <div class="panel-body">
-      <ul>
-        <li><b>stable</b>: <a href="/pkg/hello">2.10-3</a></li>
-        <li><b>testing</b>: <a href="/pkg/hello">2.10-3</a></li>
-        <li><b>unstable</b>: 2.10-4</li>
+      <ul class="list-group list-group-flush">
+        <li class="list-group-item">
+          <span class="list-item-key versions-repository"
+                title="Debian 12 (bookworm / oldstable)"><b>oldstable:</b></span>
+          <a href="https://packages.debian.org/source/oldstable/hello">2.<wbr>10-<wbr>3</a>
+        </li>
+        <li class="list-group-item">
+          <span class="list-item-key versions-repository"
+                title="Debian 13 (trixie / stable)"><b>stable:</b></span>
+          <a href="https://packages.debian.org/source/stable/hello">2.<wbr>10-<wbr>3</a>
+        </li>
+        <li class="list-group-item">
+          <span class="list-item-key versions-repository"
+                title="Debian Unstable (sid / unstable)"><b>unstable:</b></span>
+          2.10-4
+        </li>
       </ul>
     </div>
   </div>
@@ -27,10 +39,33 @@ def test_parse_tracker_versions() -> None:
 
     assert info.name == "hello"
     assert [(v.suite, v.version) for v in info.versions] == [
+        ("oldstable", "2.10-3"),
         ("stable", "2.10-3"),
-        ("testing", "2.10-3"),
         ("unstable", "2.10-4"),
     ]
+
+
+def test_parse_tracker_joins_wbr_and_uses_title_suite() -> None:
+    """真实页面用 <wbr> 拆版本号，且 label 是 o-o-stable 之类的缩写。"""
+    html = """
+    <html><body>
+      <h1>x</h1>
+      <div class="panel panel-default">
+        <div class="panel-heading"><h4>versions</h4></div>
+        <div class="panel-body"><ul>
+          <li>
+            <span class="list-item-key versions-repository"
+                  title="Debian 11 (bullseye / oldoldstable)"><b>o-o-stable:</b></span>
+            <a href="/pkg/x">1:1.<wbr>90.<wbr>7-<wbr>2</a>
+          </li>
+        </ul></div>
+      </div>
+    </body></html>
+    """
+
+    info = parse_package_page(html, fallback_name="x")
+
+    assert [(v.suite, v.version) for v in info.versions] == [("oldoldstable", "1:1.90.7-2")]
 
 
 def test_parse_tracker_without_versions_panel() -> None:
