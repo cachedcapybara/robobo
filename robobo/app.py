@@ -20,6 +20,8 @@ from .config import Settings
 from .handlers import basic, bug, pkg, tracker
 from .http import create_client
 from .services.discourse import DiscourseNotifier
+from .services.security import SecurityNotifier
+from .services.seen_store import SeenStore
 from .services.udd import UddClient
 
 log = logging.getLogger(__name__)
@@ -59,6 +61,10 @@ async def _post_shutdown(app: Application) -> None:
     if notifier is not None:
         await notifier.stop()
 
+    security = app.bot_data.pop(deps.SECURITY_NOTIFIER, None)
+    if security is not None:
+        await security.stop()
+
     log.info("robobo stopped")
 
 
@@ -69,18 +75,22 @@ def _make_post_init(settings: Settings):
         app.bot_data[deps.UDD_CLIENT] = UddClient(settings.udd_dsn)
 
         chat_id = settings.notify_chat_id
+
+        async def send_notification(text: str) -> None:
+            await app.bot.send_message(
+                chat_id=chat_id,
+                text=text,
+                parse_mode=ParseMode.HTML,
+                link_preview_options=LinkPreviewOptions(is_disabled=True),
+            )
+
         if settings.discourse_url and chat_id:
             notifier = DiscourseNotifier(
                 http,
                 base_url=settings.discourse_url,
                 category=settings.discourse_category,
                 interval=settings.discourse_poll_interval,
-                sender=lambda text: app.bot.send_message(
-                    chat_id=chat_id,
-                    text=text,
-                    parse_mode=ParseMode.HTML,
-                    link_preview_options=LinkPreviewOptions(is_disabled=True),
-                ),
+                sender=send_notification,
             )
             notifier.start()
             app.bot_data[deps.DISCOURSE_NOTIFIER] = notifier
@@ -92,6 +102,28 @@ def _make_post_init(settings: Settings):
             )
         elif settings.discourse_url:
             log.warning("已配置 DISCOURSE_URL 但缺少 NOTIFY_CHAT_ID，Discourse 通知不会启动")
+
+        if settings.security_notify_enabled and chat_id:
+            store = SeenStore.load(settings.security_state_file)
+            security = SecurityNotifier(
+                http,
+                store=store,
+                sender=send_notification,
+                interval=settings.security_poll_interval,
+                digest_threshold=settings.security_digest_threshold,
+            )
+            security.start()
+            app.bot_data[deps.SECURITY_NOTIFIER] = security
+            log.info(
+                "安全公告通知已启动：每 %ss 轮询一次，推送到 %s（状态文件 %s）",
+                settings.security_poll_interval,
+                chat_id,
+                settings.security_state_file,
+            )
+        elif settings.security_notify_enabled:
+            log.warning(
+                "已启用 SECURITY_NOTIFY_ENABLED 但缺少 NOTIFY_CHAT_ID，安全公告通知不会启动"
+            )
 
         try:
             await app.bot.set_my_commands(COMMANDS)

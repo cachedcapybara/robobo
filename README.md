@@ -17,6 +17,8 @@
 
 除命令外，配置 `DISCOURSE_URL` 后 bot 会**定时轮询 Discourse 论坛**，把新主题的标题和链接推送到 `NOTIFY_CHAT_ID`（主动出站轮询，不需要域名/入站端口）。
 
+配置 `SECURITY_NOTIFY_ENABLED=true` 后，bot 还会**定时轮询 Debian 安全公告（DSA/DLA）**，把新公告推送到 `NOTIFY_CHAT_ID`。
+
 ## 快速开始
 
 需要 Python 3.10 及以上。
@@ -50,6 +52,10 @@ python -m robobo          # 或 python main.py
 | `DISCOURSE_CATEGORY` | — | 只关注某个分类（slug，如 `feedback`）；留空则关注全站 |
 | `DISCOURSE_POLL_INTERVAL` | — | 轮询间隔秒数，默认 `60` |
 | `NOTIFY_CHAT_ID` | — | 接收新帖通知的群/会话 ID；设置 `DISCOURSE_URL` 时必须配置 |
+| `SECURITY_NOTIFY_ENABLED` | — | `true` 启用 Debian 安全公告（DSA/DLA）通知 |
+| `SECURITY_POLL_INTERVAL` | — | 安全公告轮询间隔秒数，默认 `300`，最小 `60` |
+| `SECURITY_STATE_FILE` | — | 已见记录文件，默认 `state/security.json`（建议挂持久卷） |
+| `SECURITY_DIGEST_THRESHOLD` | — | 单次超过多少条时改发摘要，默认 `5` |
 
 > `socks5://` 代理需要在镜像/环境里额外安装 `httpx[socks]`。
 
@@ -65,6 +71,13 @@ GitHub Actions 会在每次 push 到 master 时构建 `linux/amd64` + `linux/arm
 docker pull ghcr.io/cachedcapybara/robobo:latest
 docker run -d --name robobo --restart unless-stopped --env-file .env ghcr.io/cachedcapybara/robobo:latest
 ```
+
+> 启用安全公告通知时，给状态文件挂一个持久卷，否则容器重启会漏掉重启期间的公告：
+>
+> ```bash
+> docker run -d --name robobo --restart unless-stopped --env-file .env \
+>   -v robobo-state:/app/state ghcr.io/cachedcapybara/robobo:latest
+> ```
 
 镜像标签：`latest`（默认分支）、`sha-<短 sha>`、`v<版本>`（如 `v0.2.0`）、分支名。
 
@@ -126,6 +139,31 @@ NOTIFY_CHAT_ID=-1001234567890              # 必填，群 ID（supergroup 以 -1
 
 > 若要改成 Discourse webhook 实时推送，则必须提供一个公网 HTTPS 入口（Discourse 无法访问内网/NAT 地址），可以额外跑一个小的 webhook 接收端再调用 Bot API 发消息。
 
+## Debian 安全公告通知（DSA / DLA）
+
+配置 `SECURITY_NOTIFY_ENABLED=true` 和 `NOTIFY_CHAT_ID` 后，bot 会后台轮询 Debian 官方
+RSS（`dsa-long` / `dla-long`），发现新公告就推送到目标群/会话：
+
+```bash
+SECURITY_NOTIFY_ENABLED=true
+NOTIFY_CHAT_ID=-1001234567890
+SECURITY_POLL_INTERVAL=300               # 可选，秒，默认 300
+SECURITY_STATE_FILE=state/security.json  # 可选
+SECURITY_DIGEST_THRESHOLD=5              # 可选
+```
+
+实现要点：
+
+- **官方 RSS 主动轮询**：`www.debian.org` 的 `security/dsa-long`、`lts/security/dla-long`
+  公开可访问，bot 定时出站抓取，不需要域名、证书或入站端口。
+- **首次启动用完整列表核对**：从 security-tracker 的完整 `DSA/list`、`DLA/list` 补发停机
+  期间漏掉的公告；没有状态文件时只建基线、不刷历史。
+- **已见 ID 持久化**：状态写在 `SECURITY_STATE_FILE`，原子落盘；发送失败不标记、下轮重试。
+  部署时**务必挂持久卷**，否则容器重启会重新基线、漏掉重启期间的公告。
+- **卡片包含 CVE 与摘要**：每条新公告抓一次 tracker 页取 CVE/修复版本，摘要取公告正文首句；
+  CVE 过多时折叠成「前 3 个 + 总数 + 链接」。
+- **补发用摘要**：单次超过 `SECURITY_DIGEST_THRESHOLD` 条时发一条摘要，避免刷屏。
+
 ## 为什么不需要域名？
 
 Telegram 提供两种收消息的方式：
@@ -148,7 +186,8 @@ robobo/
 ├── app.py            # Application 组装、handler 注册、错误处理
 ├── __main__.py       # 入口（python -m robobo）
 ├── config.py         # 环境变量 → Settings
-├── http.py           # 共享 httpx 客户端 + 超时/重试
+├── http.py           # 共享 httpx 客户端 + 超时/重试 + 条件请求（ETag）
+├── text.py           # 纯文本工具：长消息按行分块
 ├── deps.py           # 从 bot_data 取共享依赖
 ├── handlers/         # Telegram 交互层（只做参数校验和文案）
 │   ├── basic.py
@@ -160,7 +199,9 @@ robobo/
     ├── tracker.py
     ├── bts.py
     ├── udd.py
-    └── discourse.py   # 轮询 Discourse 新帖并推送
+    ├── discourse.py   # 轮询 Discourse 新帖并推送
+    ├── security.py    # 轮询 DSA/DLA 公告并推送
+    └── seen_store.py  # 已见 ID / ETag 的原子持久化
 tests/                # pytest，不联网
 ```
 

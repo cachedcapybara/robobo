@@ -13,6 +13,7 @@ from .services.udd import UddClient
 HTTP_CLIENT = "http_client"
 UDD_CLIENT = "udd_client"
 DISCOURSE_NOTIFIER = "discourse_notifier"
+SECURITY_NOTIFIER = "security_notifier"
 
 
 def http_client(context: ContextTypes.DEFAULT_TYPE) -> httpx.AsyncClient:

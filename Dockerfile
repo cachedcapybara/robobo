@@ -16,6 +16,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY robobo ./robobo
 COPY main.py ./
 
+# 安全公告状态文件的持久化目录；预先建好并交给 robobo，
+# 这样挂命名卷到 /app/state 时所有权正确、非 root 用户可写
+RUN mkdir -p /app/state && chown robobo:robobo /app/state
+
 USER robobo
 
 # long polling：不需要暴露端口，也不需要域名
