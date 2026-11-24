@@ -29,7 +29,6 @@ class Settings:
     security_notify_enabled: bool = False
     security_poll_interval: float = 300.0
     security_state_file: str = "state/security.json"
-    security_digest_threshold: int = 5
 
 
 def parse_user_ids(raw: str | None) -> frozenset[int]:
@@ -78,19 +77,6 @@ def parse_bool(raw: str | None, default: bool = False, *, name: str = "BOOL") ->
     raise ConfigError(f"{name} 必须是 true/false：{raw!r}")
 
 
-def parse_positive_int(raw: str | None, default: int, *, name: str) -> int:
-    """解析正整数环境变量。"""
-    if raw is None or not raw.strip():
-        return default
-    try:
-        value = int(raw)
-    except ValueError as exc:
-        raise ConfigError(f"{name} 必须是整数：{raw!r}") from exc
-    if value <= 0:
-        raise ConfigError(f"{name} 必须大于 0")
-    return value
-
-
 def load_settings() -> Settings:
     """从环境变量读取配置；存在 ``.env`` 时先加载（不覆盖已有环境变量）。"""
     load_dotenv()
@@ -120,9 +106,4 @@ def load_settings() -> Settings:
         ),
         security_state_file=os.getenv("SECURITY_STATE_FILE", "").strip()
         or "state/security.json",
-        security_digest_threshold=parse_positive_int(
-            os.getenv("SECURITY_DIGEST_THRESHOLD"),
-            default=5,
-            name="SECURITY_DIGEST_THRESHOLD",
-        ),
     )

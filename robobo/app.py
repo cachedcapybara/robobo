@@ -110,7 +110,6 @@ def _make_post_init(settings: Settings):
                 store=store,
                 sender=send_notification,
                 interval=settings.security_poll_interval,
-                digest_threshold=settings.security_digest_threshold,
             )
             security.start()
             app.bot_data[deps.SECURITY_NOTIFIER] = security

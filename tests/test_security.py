@@ -10,19 +10,18 @@ from robobo.services.security import (
     DLA_LIST_URL,
     DSA_FEED_URL,
     DSA_LIST_URL,
+    MESSAGE_HEADER,
     SecurityAdvisory,
     SecurityNotifier,
-    advisory_url,
-    extract_summary,
-    format_advisory,
-    format_digest,
+    format_line,
+    format_messages,
     normalize_date,
     parse_advisory_list,
     parse_rss_feed,
-    parse_tracker_page,
     tracker_url,
 )
 from robobo.services.seen_store import SeenStore
+from robobo.text import SAFE_LIMIT
 
 RSS_TEMPLATE = """<?xml version="1.0" encoding="UTF-8" ?>
 <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
@@ -46,7 +45,7 @@ DSA_ITEM = """<item rdf:about="https://lists.debian.org/a">
 </item>"""
 
 DLA_ITEM = """<item rdf:about="https://lists.debian.org/b">
-<title>DLA-4920-1 electrum - security update</title>
+<title>DLA-4920-1 electrum - regression update</title>
 <link>https://lists.debian.org/b</link>
 <dc:date>2026-11-18</dc:date>
 <description>&lt;a href="x"&gt;tracker&lt;/a&gt;</description>
@@ -64,31 +63,6 @@ LIST_TEXT = """[19 Nov 2026] DSA-6643-1 pam-mysql - security update
 [18 Nov 2026] DSA-6637-2 needrestart - regression update
 \t[trixie] - needrestart 3.11-1.1~deb13u2
 [18 Apr 2018] DSA-4205-1 jessie end-of-life
-"""
-
-TRACKER_HTML = """<html><body><table>
-<tr><td><b>Name</b></td><td>DSA-6643-1</td></tr>
-<tr><td><b>References</b></td>
-<td><a href="/tracker/CVE-2026-124749">CVE-2026-124749</a>,
-<a href="/tracker/CVE-2026-113425">CVE-2026-113425</a></td></tr>
-</table>
-<table><tr><th>Source Package</th><th>Release</th><th>Version</th><th>Status</th></tr>
-<tr><td><a href="/tracker/source-package/pam-mysql">pam-mysql</a></td><td>trixie</td>
-<td><span class="red">0.8.2-2.1</span></td><td><span class="red">vulnerable</span></td></tr>
-<tr><td></td><td>trixie (security)</td><td>0.8.2-2.1+deb13u1</td><td>fixed</td></tr>
-</table>
-<table><tr><th>Package</th><th>Type</th><th>Release</th><th>Fixed Version</th>
-<th>Urgency</th><th>Origin</th><th>Debian Bugs</th></tr>
-<tr><td>pam-mysql</td><td>source</td><td>trixie</td><td>0.8.2-2.1+deb13u1</td>
-<td></td><td></td><td></td></tr>
-</table></body></html>
-"""
-
-TRACKER_STATUS_ONLY_HTML = """<html><body>
-<table><tr><th>Source Package</th><th>Release</th><th>Version</th><th>Status</th></tr>
-<tr><td>pam-mysql</td><td>trixie</td><td>0.8.2-2.1</td><td>vulnerable</td></tr>
-<tr><td></td><td>trixie (security)</td><td>0.8.2-2.1+deb13u1</td><td>fixed</td></tr>
-</table></body></html>
 """
 
 
@@ -130,7 +104,6 @@ def make_notifier(
     routes: dict[str, FakeResponse] | None = None,
     *,
     store: SeenStore | None = None,
-    digest_threshold: int = 5,
 ) -> tuple[SecurityNotifier, FakeClient, SeenStore]:
     state_file = str(tmp_path / "state" / "security.json")
     store = store if store is not None else SeenStore.load(state_file)
@@ -141,9 +114,20 @@ def make_notifier(
         store=store,
         sender=sender or FakeSender(),
         interval=300,
-        digest_threshold=digest_threshold,
     )
     return notifier, client, store
+
+
+def make_advisory(**kwargs) -> SecurityAdvisory:
+    defaults = {
+        "id": "DSA-6643-1",
+        "package": "pam-mysql",
+        "title": "security update",
+        "date": "2026-11-19",
+        "source": "DSA",
+    }
+    defaults.update(kwargs)
+    return SecurityAdvisory(**defaults)
 
 
 # --- 解析 -------------------------------------------------------------------
@@ -156,24 +140,6 @@ def test_normalize_date() -> None:
     assert normalize_date("garbage") == "garbage"
 
 
-def test_extract_summary_strips_tags_and_takes_first_sentence() -> None:
-    summary = extract_summary(
-        "Andrey discovered a problem. It is bad.&lt;p&gt;&lt;a href=\"x\"&gt;tracker&lt;/a&gt;"
-    )
-    assert summary == "Andrey discovered a problem."
-
-
-def test_extract_summary_truncates_long_sentence() -> None:
-    summary = extract_summary("A" * 200 + ". More.")
-    assert len(summary) <= 121
-    assert summary.endswith("…")
-
-
-def test_extract_summary_empty() -> None:
-    assert extract_summary("") == ""
-    assert extract_summary("&lt;a href=\"x\"&gt;tracker&lt;/a&gt;") == ""
-
-
 def test_parse_rss_feed() -> None:
     items = parse_rss_feed(RSS_BOTH)
 
@@ -183,8 +149,7 @@ def test_parse_rss_feed() -> None:
     assert first.title == "security update"
     assert first.date == "2026-11-19"
     assert first.source == "DSA"
-    assert first.summary == "Andrey discovered a problem."
-    assert items[1].summary == ""
+    assert items[1].title == "regression update"
 
 
 def test_parse_rss_feed_skips_unparseable_titles() -> None:
@@ -202,11 +167,10 @@ def test_parse_advisory_list() -> None:
         "DSA-4205-1",
     ]
     first = items[0]
+    assert first.package == "pam-mysql"
+    assert first.title == "security update"
     assert first.date == "2026-11-19"
-    assert first.cves == ("CVE-2026-124749",)
-    assert first.suites == (("trixie", "0.8.2-2.1+deb13u1"),)
-    assert items[1].cves == ("CVE-2026-113425", "CVE-2026-118899")
-    assert items[2].cves == ()
+    assert items[2].title == "regression update"
     # 旧格式（无 " - " 分隔）不能崩
     assert items[3].package == "jessie"
     assert items[3].date == "2018-04-18"
@@ -219,117 +183,77 @@ def test_parse_advisory_list_without_revision() -> None:
     assert items[0].date == "2006-11-12"
 
 
-def test_parse_tracker_page() -> None:
-    cves, suites = parse_tracker_page(TRACKER_HTML)
-
-    assert cves == ("CVE-2026-124749", "CVE-2026-113425")
-    assert suites == (("trixie", "0.8.2-2.1+deb13u1"),)
-
-
-def test_parse_tracker_page_fallback_to_status_table() -> None:
-    cves, suites = parse_tracker_page(TRACKER_STATUS_ONLY_HTML)
-
-    assert cves == ()
-    assert suites == (("trixie", "0.8.2-2.1+deb13u1"),)
-
-
 # --- 格式化 -----------------------------------------------------------------
 
 
-def make_advisory(**kwargs) -> SecurityAdvisory:
-    defaults = {
-        "id": "DSA-6643-1",
-        "package": "pam-mysql",
-        "title": "security update",
-        "date": "2026-11-19",
-        "source": "DSA",
-    }
-    defaults.update(kwargs)
-    return SecurityAdvisory(**defaults)
-
-
-def test_advisory_url() -> None:
-    assert (
-        advisory_url("DSA-6643-1", "2026-11-19")
-        == "https://www.debian.org/security/2026/dsa-6643-1"
-    )
-    assert (
-        advisory_url("DLA-4920-1", "2026-11-19")
-        == "https://www.debian.org/lts/security/2026/dla-4920-1"
-    )
-    assert advisory_url("DSA-6643-1", "") == ""
-
-
-def test_format_advisory_full() -> None:
-    adv = make_advisory(
-        cves=("CVE-2026-124749",),
-        suites=(("trixie", "0.8.2-2.1+deb13u1"),),
-        summary="Andrey discovered a problem.",
-    )
-    lines = format_advisory(adv).split("\n")
-
-    assert lines[0] == (
-        '🛡️ <a href="https://security-tracker.debian.org/tracker/DSA-6643-1">DSA-6643-1</a>'
-        " · pam-mysql"
-    )
-    assert lines[1] == "📅 2026-11-19  📦 trixie 0.8.2-2.1+deb13u1"
-    assert lines[2] == "🐞 CVE-2026-124749"
-    assert lines[3] == "📝 Andrey discovered a problem."
-    assert lines[4] == (
-        '🔗 <a href="https://www.debian.org/security/2026/dsa-6643-1">公告全文</a>'
+def test_format_line() -> None:
+    adv = make_advisory()
+    assert format_line(adv) == (
+        '<a href="https://security-tracker.debian.org/tracker/DSA-6643-1">DSA-6643-1</a>'
+        " · pam-mysql · security update"
     )
 
 
-def test_format_advisory_folds_long_cve_list() -> None:
-    adv = make_advisory(cves=("CVE-1", "CVE-2", "CVE-3", "CVE-4"))
-    lines = format_advisory(adv).split("\n")
+def test_format_line_escapes_html() -> None:
+    line = format_line(make_advisory(package="<script>", title="<b>bad</b>"))
 
-    assert "🐞 CVE-1, CVE-2, CVE-3 … 共 4 个" in lines
-    assert "全部 CVE" in lines[-1]
-    assert tracker_url("DSA-6643-1") in lines[-1]
-
-
-def test_format_advisory_multi_suite() -> None:
-    adv = make_advisory(
-        suites=(("bookworm", "1"), ("trixie", "2"), ("bullseye", "3"), ("sid", "4"))
-    )
-    lines = format_advisory(adv).split("\n")
-
-    assert lines[1] == "📅 2026-11-19  📦 bookworm 1"
-    assert lines[2] == "📦 trixie 2"
-    assert lines[3] == "📦 bullseye 3"
-    assert lines[4] == "… 共 4 个版本"
+    assert "<script>" not in line
+    assert "&lt;script&gt;" in line
+    assert "<b>bad</b>" not in line
 
 
-def test_format_advisory_escapes_html() -> None:
-    adv = make_advisory(package="<script>", summary="<b>bad</b>")
-    text = format_advisory(adv)
-
-    assert "<script>" not in text
-    assert "&lt;script&gt;" in text
-    assert "<b>bad</b>" not in text
+def test_format_line_without_type() -> None:
+    line = format_line(make_advisory(title=""))
+    assert line.endswith(" · pam-mysql")
 
 
-def test_format_advisory_minimal() -> None:
-    lines = format_advisory(make_advisory()).split("\n")
-
-    assert len(lines) == 3
-    assert lines[1] == "📅 2026-11-19"
-    assert lines[2].startswith("🔗 ")
-
-
-def test_format_digest() -> None:
+def test_format_messages_merges_into_one() -> None:
     items = [
         make_advisory(id="DSA-6643-1", package="pam-mysql", date="2026-11-19"),
-        make_advisory(id="DSA-6642-1", package="nginx", date="2026-11-19"),
-        make_advisory(id="DSA-6637-2", package="needrestart", date="2026-11-18"),
+        make_advisory(id="DLA-4920-1", package="electrum", title="regression update"),
     ]
-    lines = format_digest(items).split("\n")
 
-    assert lines[0] == "📋 安全公告补发 · 2026-11-18 ~ 2026-11-19 · 共 3 条"
-    assert len(lines) == 4
+    messages = format_messages(items)
+
+    assert len(messages) == 1
+    lines = messages[0].split("\n")
+    assert lines[0] == MESSAGE_HEADER
+    assert len(lines) == 3
     assert "DSA-6643-1" in lines[1]
-    assert "DSA-6637-2" in lines[3]
+    assert "security update" in lines[1]
+    assert "regression update" in lines[2]
+
+
+def test_format_messages_orders_newest_first() -> None:
+    items = [
+        make_advisory(id="DSA-0001-1", package="old", date="2026-11-18"),
+        make_advisory(id="DSA-0002-1", package="new", date="2026-11-19"),
+    ]
+
+    lines = format_messages(items)[0].split("\n")
+
+    assert "DSA-0002-1" in lines[1]
+    assert "DSA-0001-1" in lines[2]
+
+
+def test_format_messages_chunks_long_batches() -> None:
+    items = [
+        make_advisory(id=f"DSA-{i:04d}-1", package="p" * 80, date="2026-11-19")
+        for i in range(200)
+    ]
+
+    messages = format_messages(items)
+
+    assert len(messages) > 1
+    assert all(message.startswith(MESSAGE_HEADER) for message in messages)
+    assert all(len(message) <= SAFE_LIMIT for message in messages)
+    joined = "\n".join(messages)
+    for item in items:
+        assert item.id in joined
+
+
+def test_format_messages_empty() -> None:
+    assert format_messages([]) == []
 
 
 # --- 状态 -------------------------------------------------------------------
@@ -391,7 +315,7 @@ def test_reconcile_baselines_without_notifying(tmp_path: Path) -> None:
     asyncio.run(run())
 
 
-def test_reconcile_backfills_unseen_as_digest(tmp_path: Path) -> None:
+def test_reconcile_backfills_unseen(tmp_path: Path) -> None:
     async def run() -> None:
         store = SeenStore(path="x", seen={"DSA-6643-1": "2026-11-19"})
         routes = {DSA_LIST_URL: FakeResponse(LIST_TEXT), DLA_LIST_URL: FakeResponse("")}
@@ -402,31 +326,31 @@ def test_reconcile_backfills_unseen_as_digest(tmp_path: Path) -> None:
 
         assert sent == 3  # DSA-6642-1、DSA-6637-2、DSA-4205-1
         assert len(sender.sent) == 1
-        assert "安全公告补发" in sender.sent[0]
+        assert sender.sent[0].startswith(MESSAGE_HEADER)
         assert "DSA-6642-1" in sender.sent[0]
         assert "DSA-6643-1" not in sender.sent[0]
 
     asyncio.run(run())
 
 
-def test_poll_sends_rich_card_with_tracker_data(tmp_path: Path) -> None:
+def test_poll_sends_merged_message(tmp_path: Path) -> None:
     async def run() -> None:
         routes = {
             DSA_FEED_URL: FakeResponse(RSS_DSA),
             DLA_FEED_URL: FakeResponse(RSS_TEMPLATE.format(items="")),
-            tracker_url("DSA-6643-1"): FakeResponse(TRACKER_HTML),
         }
         sender = FakeSender()
         notifier, _client, store = make_notifier(tmp_path, sender, routes)
 
-        sent = await notifier.poll_once()
+        count = await notifier.poll_once()
 
-        assert sent == 1
-        card = sender.sent[0]
-        assert "DSA-6643-1" in card
-        assert "CVE-2026-124749" in card
-        assert "trixie 0.8.2-2.1+deb13u1" in card
-        assert "Andrey discovered a problem." in card
+        assert count == 1
+        message = sender.sent[0]
+        assert message.split("\n")[0] == MESSAGE_HEADER
+        assert "DSA-6643-1" in message
+        assert "pam-mysql" in message
+        assert "security update" in message
+        assert tracker_url("DSA-6643-1") in message
         assert store.has("DSA-6643-1")
 
     asyncio.run(run())
@@ -453,7 +377,6 @@ def test_poll_uses_etag_and_handles_304(tmp_path: Path) -> None:
         routes = {
             DSA_FEED_URL: FakeResponse(RSS_DSA, headers={"etag": '"v1"'}),
             DLA_FEED_URL: FakeResponse(RSS_TEMPLATE.format(items="")),
-            tracker_url("DSA-6643-1"): FakeResponse(TRACKER_HTML),
         }
         sender = FakeSender()
         notifier, client, store = make_notifier(tmp_path, sender, routes)
@@ -469,12 +392,11 @@ def test_poll_uses_etag_and_handles_304(tmp_path: Path) -> None:
     asyncio.run(run())
 
 
-def test_poll_send_failure_keeps_item_unseen(tmp_path: Path) -> None:
+def test_poll_send_failure_keeps_items_unseen(tmp_path: Path) -> None:
     async def run() -> None:
         routes = {
             DSA_FEED_URL: FakeResponse(RSS_DSA),
             DLA_FEED_URL: FakeResponse(RSS_TEMPLATE.format(items="")),
-            tracker_url("DSA-6643-1"): FakeResponse(TRACKER_HTML),
         }
         sender = FakeSender(fail=True)
         notifier, _client, store = make_notifier(tmp_path, sender, routes)
@@ -490,29 +412,6 @@ def test_poll_send_failure_keeps_item_unseen(tmp_path: Path) -> None:
     asyncio.run(run())
 
 
-def test_poll_uses_digest_above_threshold(tmp_path: Path) -> None:
-    async def run() -> None:
-        routes = {
-            DSA_FEED_URL: FakeResponse(RSS_BOTH),
-            DLA_FEED_URL: FakeResponse(RSS_TEMPLATE.format(items="")),
-            tracker_url("DSA-6643-1"): FakeResponse(TRACKER_HTML),
-        }
-        sender = FakeSender()
-        notifier, _client, store = make_notifier(
-            tmp_path, sender, routes, digest_threshold=1
-        )
-
-        sent = await notifier.poll_once()
-
-        assert sent == 2  # DSA-6643-1 与 DLA-4920-1
-        assert len(sender.sent) == 1
-        assert "安全公告补发" in sender.sent[0]
-        assert store.has("DSA-6643-1")
-        assert store.has("DLA-4920-1")
-
-    asyncio.run(run())
-
-
 def test_poll_skips_malformed_feed(tmp_path: Path) -> None:
     async def run() -> None:
         routes = {
@@ -522,9 +421,9 @@ def test_poll_skips_malformed_feed(tmp_path: Path) -> None:
         sender = FakeSender()
         notifier, _client, _store = make_notifier(tmp_path, sender, routes)
 
-        sent = await notifier.poll_once()
+        count = await notifier.poll_once()
 
-        assert sent == 1
+        assert count == 1
         assert "DLA-4920-1" in sender.sent[0]
 
     asyncio.run(run())

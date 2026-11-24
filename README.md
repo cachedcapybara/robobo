@@ -55,7 +55,6 @@ python -m robobo          # 或 python main.py
 | `SECURITY_NOTIFY_ENABLED` | — | `true` 启用 Debian 安全公告（DSA/DLA）通知 |
 | `SECURITY_POLL_INTERVAL` | — | 安全公告轮询间隔秒数，默认 `300`，最小 `60` |
 | `SECURITY_STATE_FILE` | — | 已见记录文件，默认 `state/security.json`（建议挂持久卷） |
-| `SECURITY_DIGEST_THRESHOLD` | — | 单次超过多少条时改发摘要，默认 `5` |
 
 > `socks5://` 代理需要在镜像/环境里额外安装 `httpx[socks]`。
 
@@ -149,20 +148,28 @@ SECURITY_NOTIFY_ENABLED=true
 NOTIFY_CHAT_ID=-1001234567890
 SECURITY_POLL_INTERVAL=300               # 可选，秒，默认 300
 SECURITY_STATE_FILE=state/security.json  # 可选
-SECURITY_DIGEST_THRESHOLD=5              # 可选
+```
+
+新公告合并成**一条消息**发送，每行一条（编号为 tracker 链接）：
+
+```
+🛡️ Security
+DSA-6654-1 · mediawiki · security update
+DSA-6653-1 · chromium · security update
+DLA-4932-1 · chromium · security update
 ```
 
 实现要点：
 
 - **官方 RSS 主动轮询**：`www.debian.org` 的 `security/dsa-long`、`lts/security/dla-long`
   公开可访问，bot 定时出站抓取，不需要域名、证书或入站端口。
+- **类型来自标题尾部**：`编号 · 包名 · 类型`，例如 `security update`、`regression update`、
+  `new timezone database`。
 - **首次启动用完整列表核对**：从 security-tracker 的完整 `DSA/list`、`DLA/list` 补发停机
   期间漏掉的公告；没有状态文件时只建基线、不刷历史。
 - **已见 ID 持久化**：状态写在 `SECURITY_STATE_FILE`，原子落盘；发送失败不标记、下轮重试。
   部署时**务必挂持久卷**，否则容器重启会重新基线、漏掉重启期间的公告。
-- **卡片包含 CVE 与摘要**：每条新公告抓一次 tracker 页取 CVE/修复版本，摘要取公告正文首句；
-  CVE 过多时折叠成「前 3 个 + 总数 + 链接」。
-- **补发用摘要**：单次超过 `SECURITY_DIGEST_THRESHOLD` 条时发一条摘要，避免刷屏。
+- 单条消息超过 Telegram 4096 字符时自动分块（每块重复 `🛡️ Security` 头）。
 
 ## 为什么不需要域名？
 

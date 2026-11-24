@@ -14,7 +14,6 @@ from robobo.config import (
     load_settings,
     parse_bool,
     parse_poll_interval,
-    parse_positive_int,
     parse_user_ids,
 )
 from robobo.handlers.common import SAFE_LIMIT, reply_html, split_message
@@ -81,29 +80,18 @@ def test_parse_bool() -> None:
         parse_bool("maybe")
 
 
-def test_parse_positive_int() -> None:
-    assert parse_positive_int(None, default=5, name="X") == 5
-    assert parse_positive_int("3", default=5, name="X") == 3
-    with pytest.raises(ConfigError):
-        parse_positive_int("0", default=5, name="X")
-    with pytest.raises(ConfigError):
-        parse_positive_int("abc", default=5, name="X")
-
-
 def test_load_settings_parses_security_options(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("robobo.config.load_dotenv", lambda: None)
     monkeypatch.setenv("BOT_TOKEN", "123:abc")
     monkeypatch.setenv("SECURITY_NOTIFY_ENABLED", "true")
     monkeypatch.setenv("SECURITY_POLL_INTERVAL", "120")
     monkeypatch.setenv("SECURITY_STATE_FILE", "/tmp/security.json")
-    monkeypatch.setenv("SECURITY_DIGEST_THRESHOLD", "8")
 
     settings = load_settings()
 
     assert settings.security_notify_enabled is True
     assert settings.security_poll_interval == 120.0
     assert settings.security_state_file == "/tmp/security.json"
-    assert settings.security_digest_threshold == 8
 
 
 def test_load_settings_security_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -112,14 +100,12 @@ def test_load_settings_security_defaults(monkeypatch: pytest.MonkeyPatch) -> Non
     monkeypatch.delenv("SECURITY_NOTIFY_ENABLED", raising=False)
     monkeypatch.delenv("SECURITY_POLL_INTERVAL", raising=False)
     monkeypatch.delenv("SECURITY_STATE_FILE", raising=False)
-    monkeypatch.delenv("SECURITY_DIGEST_THRESHOLD", raising=False)
 
     settings = load_settings()
 
     assert settings.security_notify_enabled is False
     assert settings.security_poll_interval == 300.0
     assert settings.security_state_file == "state/security.json"
-    assert settings.security_digest_threshold == 5
 
 
 def test_split_message_keeps_short_text_intact() -> None:
